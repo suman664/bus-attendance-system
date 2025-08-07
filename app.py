@@ -1,12 +1,10 @@
-# app.py - Complete version without pandas
+# app.py - Complete version with fixed nepali date
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import json
 import os
-from datetime import datetime
+from datetime import datetime, date
 import csv
-from nepali_datetime import date as nepali_date
-import nepali_datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -15,6 +13,29 @@ CORS(app)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'bus_data')
 ROUTES_FILE = os.path.join(DATA_DIR, 'routes.json')
+
+# Try to import nepali datetime
+try:
+    from nepali_datetime import date as nepali_date
+    import nepali_datetime
+    NEPALI_DATE_AVAILABLE = True
+    print("Nepali datetime loaded successfully")
+except ImportError as e:
+    print(f"Nepali datetime not available: {e}")
+    NEPALI_DATE_AVAILABLE = False
+    
+    # Mock implementation for fallback
+    class MockNepaliDate:
+        @staticmethod
+        def from_datetime_date(date_obj):
+            return MockNepaliDateObject()
+    
+    class MockNepaliDateObject:
+        def strftime(self, format_str):
+            from datetime import datetime
+            return datetime.now().strftime('%Y-%m-%d')
+    
+    nepali_date = MockNepaliDate()
 
 # Initialize data directory and files
 def initialize_data():
@@ -93,9 +114,6 @@ def get_students_for_route(route_name):
 # Archive student
 def archive_student(student_id):
     try:
-        route_name, student_idx = student_id.split('_')
-        route_name = route_name + '_' + student_idx.split('_')[0]  # Reconstruct if needed
-        # Find the correct route
         routes = load_routes()
         for route, students in routes.items():
             for i, student in enumerate(students):
@@ -110,9 +128,10 @@ def archive_student(student_id):
                             rows = list(reader)
                         
                         # Update the student row
-                        if len(rows) > int(student_idx) + 1:  # +1 for header
-                            rows[int(student_idx) + 1][2] = 'Archived'  # status column
-                            rows[int(student_idx) + 1][3] = datetime.now().strftime('%Y-%m-%d')  # archive date
+                        if len(rows) > int(student_id.split('_')[1]) + 1:  # +1 for header
+                            student_idx = int(student_id.split('_')[1]) + 1
+                            rows[student_idx][2] = 'Archived'  # status column
+                            rows[student_idx][3] = datetime.now().strftime('%Y-%m-%d')  # archive date
                         
                         # Write back
                         with open(csv_file, 'w', newline='', encoding='utf-8') as f:
@@ -140,10 +159,10 @@ def restore_student(student_id):
                             rows = list(reader)
                         
                         # Update the student row
-                        student_idx = i
-                        if len(rows) > student_idx + 1:  # +1 for header
-                            rows[student_idx + 1][2] = 'Active'  # status column
-                            rows[student_idx + 1][3] = ''  # clear archive date
+                        student_idx = int(student_id.split('_')[1]) + 1
+                        if len(rows) > student_idx:  # +1 for header
+                            rows[student_idx][2] = 'Active'  # status column
+                            rows[student_idx][3] = ''  # clear archive date
                         
                         # Write back
                         with open(csv_file, 'w', newline='', encoding='utf-8') as f:
@@ -222,18 +241,16 @@ def get_attendance(route_name, date_str):
 # Get student history
 def get_student_history(student_id):
     try:
-        route_name = student_id.split('_')[0] + '_' + student_id.split('_')[1].split('_')[0]
-        # Find the correct route
         routes = load_routes()
-        for route in routes:
-            csv_file = get_csv_filename(route)
+        for route_name in routes:
+            csv_file = get_csv_filename(route_name)
             if os.path.exists(csv_file):
                 history = []
                 with open(csv_file, 'r', newline='', encoding='utf-8') as f:
                     reader = csv.reader(f)
                     headers = next(reader)
                     for i, row in enumerate(reader):
-                        if row[0] == student_id and len(row) > 2 and row[2] == 'Active':
+                        if len(row) > 0 and row[0] == student_id and len(row) > 2 and row[2] == 'Active':
                             # Check all date columns
                             for j in range(4, len(headers)):  # Skip first 4 columns (id, name, status, archive_date)
                                 if len(row) > j and row[j]:
@@ -242,7 +259,8 @@ def get_student_history(student_id):
                                         'status': row[j] == 'P'
                                     })
                             break
-                return history
+                if history:
+                    return history
         return []
     except:
         return []
@@ -262,7 +280,7 @@ def get_date_history(date_str):
                 if date_str in headers:
                     date_col_index = headers.index(date_str)
                     for row in reader:
-                        if len(row) > 2 and row[2] == 'Active' and len(row) > date_col_index:
+                        if len(row) > 2 and row[2] == 'Active' and len(row) > date_col_index and row[date_col_index]:
                             history.append({
                                 'student_name': row[1],
                                 'route': route_name,
@@ -271,11 +289,28 @@ def get_date_history(date_str):
     
     return history
 
-# Get Nepali date
+# Get Nepali date - CORRECTED VERSION
 def get_nepali_date():
-    today = datetime.today()
-    nepali_dt = nepali_date.from_datetime_date(today.date())
-    return nepali_dt.strftime('%Y-%m-%d')
+    """Get accurate current Nepali date"""
+    try:
+        if NEPALI_DATE_AVAILABLE:
+            # Get today's Gregorian date
+            today = date.today()
+            
+            # Convert to Nepali date
+            nepali_dt = nepali_date.from_datetime_date(today)
+            
+            # Format as YYYY-MM-DD
+            return nepali_dt.strftime('%Y-%m-%d')
+        else:
+            # Fallback to Gregorian date
+            today = date.today()
+            return today.strftime('%Y-%m-%d')
+    except Exception as e:
+        print(f"Error in nepali date conversion: {e}")
+        # Ultimate fallback
+        today = date.today()
+        return today.strftime('%Y-%m-%d')
 
 # API Routes
 @app.route('/api/routes')
@@ -403,6 +438,33 @@ def get_current_nepali_date():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Debug endpoint to check date conversion
+@app.route('/api/debug/date')
+def debug_date():
+    """Debug endpoint to check date conversion"""
+    try:
+        gregorian_today = date.today()
+        gregorian_now = datetime.now()
+        
+        debug_info = {
+            'gregorian_date': gregorian_today.strftime('%Y-%m-%d'),
+            'gregorian_datetime': gregorian_now.strftime('%Y-%m-%d %H:%M:%S'),
+            'nepali_available': NEPALI_DATE_AVAILABLE,
+            'nepali_date_result': None,
+            'error': None
+        }
+        
+        if NEPALI_DATE_AVAILABLE:
+            try:
+                nepali_dt = nepali_date.from_datetime_date(gregorian_today)
+                debug_info['nepali_date_result'] = nepali_dt.strftime('%Y-%m-%d')
+            except Exception as e:
+                debug_info['error'] = str(e)
+        
+        return jsonify(debug_info)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Sync offline data endpoint
 @app.route('/api/sync', methods=['POST'])
 def sync_offline_data():
@@ -423,6 +485,57 @@ def sync_offline_data():
             'message': f'Successfully synced {synced_count} records',
             'synced_count': synced_count
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Export data endpoints
+@app.route('/api/data/export/json')
+def export_data_json():
+    """Export all data as JSON file"""
+    try:
+        # Read all CSV files and combine data
+        routes = load_routes()
+        export_data = {}
+        
+        for route_name in routes:
+            csv_file = get_csv_filename(route_name)
+            if os.path.exists(csv_file):
+                with open(csv_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    export_data[route_name] = list(reader)
+        
+        return jsonify(export_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/backup')
+def create_backup():
+    """Create and download a backup of all data"""
+    try:
+        import zipfile
+        import tempfile
+        import shutil
+        
+        # Create a temporary zip file
+        temp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(temp_dir, 'bus_attendance_backup.zip')
+        
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            # Add routes.json
+            if os.path.exists(ROUTES_FILE):
+                zipf.write(ROUTES_FILE, 'routes.json')
+            
+            # Add all CSV files
+            if os.path.exists(DATA_DIR):
+                for filename in os.listdir(DATA_DIR):
+                    if filename.endswith('.csv'):
+                        file_path = os.path.join(DATA_DIR, filename)
+                        zipf.write(file_path, filename)
+        
+        return open(zip_path, 'rb').read(), 200, {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': 'attachment; filename=bus_attendance_backup.zip'
+        }
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
