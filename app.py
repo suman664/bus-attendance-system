@@ -1,4 +1,4 @@
-# app.py - Complete version with fixed nepali date
+# app.py - Complete version with compatible nepali date
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import json
@@ -14,28 +14,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'bus_data')
 ROUTES_FILE = os.path.join(DATA_DIR, 'routes.json')
 
-# Try to import nepali datetime
+# Try to import nepali datetime with better error handling
+NEPALI_DATE_AVAILABLE = False
+nepali_date = None
+
 try:
-    from nepali_datetime import date as nepali_date
     import nepali_datetime
+    from nepali_datetime import date as nepali_date_module
+    nepali_date = nepali_date_module
     NEPALI_DATE_AVAILABLE = True
     print("Nepali datetime loaded successfully")
 except ImportError as e:
     print(f"Nepali datetime not available: {e}")
     NEPALI_DATE_AVAILABLE = False
-    
-    # Mock implementation for fallback
-    class MockNepaliDate:
-        @staticmethod
-        def from_datetime_date(date_obj):
-            return MockNepaliDateObject()
-    
-    class MockNepaliDateObject:
-        def strftime(self, format_str):
-            from datetime import datetime
-            return datetime.now().strftime('%Y-%m-%d')
-    
-    nepali_date = MockNepaliDate()
+except Exception as e:
+    print(f"Nepali datetime import error: {e}")
+    NEPALI_DATE_AVAILABLE = False
 
 # Initialize data directory and files
 def initialize_data():
@@ -45,10 +39,10 @@ def initialize_data():
     # Create initial routes if file doesn't exist
     if not os.path.exists(ROUTES_FILE):
         initial_data = {
-            'Route A': [],
-            'Route B': [],
-            'Route C': [],
-            'Route D': []
+            'Motipur Route': [],
+            'Deudha Route': [],
+            'Juraina Route': [],
+            'Dangpur Route': []
         }
         with open(ROUTES_FILE, 'w') as f:
             json.dump(initial_data, f, indent=2)
@@ -289,28 +283,36 @@ def get_date_history(date_str):
     
     return history
 
-# Get Nepali date - CORRECTED VERSION
+# Get Nepali date - FIXED VERSION
 def get_nepali_date():
-    """Get accurate current Nepali date"""
+    """Get current Nepali date with proper error handling"""
     try:
-        if NEPALI_DATE_AVAILABLE:
-            # Get today's Gregorian date
-            today = date.today()
-            
-            # Convert to Nepali date
-            nepali_dt = nepali_date.from_datetime_date(today)
-            
-            # Format as YYYY-MM-DD
-            return nepali_dt.strftime('%Y-%m-%d')
+        # Get today's Gregorian date
+        today = date.today()
+        
+        # Try to use nepali_datetime if available
+        if NEPALI_DATE_AVAILABLE and nepali_date:
+            try:
+                # Convert Gregorian date to Nepali
+                nepali_dt = nepali_date.from_datetime_date(today)
+                # Return formatted date
+                return str(nepali_dt)
+            except Exception as convert_error:
+                print(f"Nepali date conversion error: {convert_error}")
+                # Fallback to Gregorian
+                return today.strftime('%Y-%m-%d')
         else:
             # Fallback to Gregorian date
+            return today.strftime('%Y-%m-%d')
+            
+    except Exception as e:
+        print(f"Error getting nepali date: {e}")
+        # Ultimate fallback
+        try:
             today = date.today()
             return today.strftime('%Y-%m-%d')
-    except Exception as e:
-        print(f"Error in nepali date conversion: {e}")
-        # Ultimate fallback
-        today = date.today()
-        return today.strftime('%Y-%m-%d')
+        except:
+            return "2080-01-01"  # Default fallback
 
 # API Routes
 @app.route('/api/routes')
@@ -438,28 +440,27 @@ def get_current_nepali_date():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Debug endpoint to check date conversion
+# Debug endpoint
 @app.route('/api/debug/date')
 def debug_date():
     """Debug endpoint to check date conversion"""
     try:
-        gregorian_today = date.today()
-        gregorian_now = datetime.now()
+        today = date.today()
         
         debug_info = {
-            'gregorian_date': gregorian_today.strftime('%Y-%m-%d'),
-            'gregorian_datetime': gregorian_now.strftime('%Y-%m-%d %H:%M:%S'),
+            'gregorian_date': today.strftime('%Y-%m-%d'),
             'nepali_available': NEPALI_DATE_AVAILABLE,
+            'nepali_import_success': nepali_date is not None,
             'nepali_date_result': None,
             'error': None
         }
         
-        if NEPALI_DATE_AVAILABLE:
+        if NEPALI_DATE_AVAILABLE and nepali_date:
             try:
-                nepali_dt = nepali_date.from_datetime_date(gregorian_today)
-                debug_info['nepali_date_result'] = nepali_dt.strftime('%Y-%m-%d')
+                nepali_dt = nepali_date.from_datetime_date(today)
+                debug_info['nepali_date_result'] = str(nepali_dt)
             except Exception as e:
-                debug_info['error'] = str(e)
+                debug_info['error'] = f"Conversion error: {str(e)}"
         
         return jsonify(debug_info)
     except Exception as e:
@@ -485,57 +486,6 @@ def sync_offline_data():
             'message': f'Successfully synced {synced_count} records',
             'synced_count': synced_count
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# Export data endpoints
-@app.route('/api/data/export/json')
-def export_data_json():
-    """Export all data as JSON file"""
-    try:
-        # Read all CSV files and combine data
-        routes = load_routes()
-        export_data = {}
-        
-        for route_name in routes:
-            csv_file = get_csv_filename(route_name)
-            if os.path.exists(csv_file):
-                with open(csv_file, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    export_data[route_name] = list(reader)
-        
-        return jsonify(export_data)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/backup')
-def create_backup():
-    """Create and download a backup of all data"""
-    try:
-        import zipfile
-        import tempfile
-        import shutil
-        
-        # Create a temporary zip file
-        temp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(temp_dir, 'bus_attendance_backup.zip')
-        
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
-            # Add routes.json
-            if os.path.exists(ROUTES_FILE):
-                zipf.write(ROUTES_FILE, 'routes.json')
-            
-            # Add all CSV files
-            if os.path.exists(DATA_DIR):
-                for filename in os.listdir(DATA_DIR):
-                    if filename.endswith('.csv'):
-                        file_path = os.path.join(DATA_DIR, filename)
-                        zipf.write(file_path, filename)
-        
-        return open(zip_path, 'rb').read(), 200, {
-            'Content-Type': 'application/zip',
-            'Content-Disposition': 'attachment; filename=bus_attendance_backup.zip'
-        }
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
