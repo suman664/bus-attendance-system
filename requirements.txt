@@ -1,4 +1,4 @@
 Flask==2.3.2
 Flask-CORS==4.0.0
 gunicorn==20.1.0
-nepali-datetime==1.0.11
+nepali-datetime==1.0.7
