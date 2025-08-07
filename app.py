@@ -45,10 +45,10 @@ def initialize_data():
     # Create initial routes if file doesn't exist
     if not os.path.exists(ROUTES_FILE):
         initial_data = {
-            'Route A': [],
-            'Route B': [],
-            'Route C': [],
-            'Route D': []
+            'Motipur Route': [],
+            'Deudha Route': [],
+            'Juraina Route': [],
+            'Dangpur Route': []
         }
         with open(ROUTES_FILE, 'w') as f:
             json.dump(initial_data, f, indent=2)
@@ -542,3 +542,4 @@ def create_backup():
 if __name__ == '__main__':
     initialize_data()
     app.run(debug=True, port=int(os.environ.get('PORT', 5000)))
+
