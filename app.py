@@ -1,4 +1,4 @@
-# app.py - Complete version WITHOUT nepali-datetime dependency
+# app.py - Complete version using student names (no IDs)
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import json
@@ -15,7 +15,8 @@ DATA_DIR = os.path.join(BASE_DIR, 'bus_data')
 ROUTES_FILE = os.path.join(DATA_DIR, 'routes.json')
 
 # Simple Gregorian to Nepali date converter (approximate)
-def gregorian_to_nepali Approximate conversion - not perfectly accurate but close enough
+def gregorian_to_nepali(gregorian_date):
+    """Approximate conversion - not perfectly accurate but close enough"""
     gregorian_year = gregorian_date.year
     gregorian_month = gregorian_date.month
     gregorian_day = gregorian_date.day
@@ -80,7 +81,7 @@ def initialize_route_csv(route_name):
     if not os.path.exists(csv_file):
         with open(csv_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['student_id', 'name', 'status', 'archive_date'])
+            writer.writerow(['name', 'status', 'archive_date'])
 
 # Add student to route
 def add_student_to_route(route_name, student_name):
@@ -90,10 +91,13 @@ def add_student_to_route(route_name, student_name):
     if route_name not in routes:
         return False
     
+    # Check if student already exists
+    for student in routes[route_name]:
+        if student['name'] == student_name:
+            return False  # Student already exists
+    
     # Add student to routes JSON
-    student_id = f"{route_name}_{len(routes[route_name])}"
     routes[route_name].append({
-        'id': student_id,
         'name': student_name
     })
     save_routes(routes)
@@ -105,7 +109,7 @@ def add_student_to_route(route_name, student_name):
     csv_file = get_csv_filename(route_name)
     with open(csv_file, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow([student_id, student_name, 'Active', ''])
+        writer.writerow([student_name, 'Active', ''])
     
     return True
 
@@ -117,63 +121,65 @@ def get_students_for_route(route_name):
     return []
 
 # Archive student
-def archive_student(student_id):
+def archive_student(route_name, student_name):
     try:
+        # Update routes JSON
         routes = load_routes()
-        for route, students in routes.items():
-            for i, student in enumerate(students):
-                if student['id'] == student_id:
-                    # Update CSV file
-                    csv_file = get_csv_filename(route)
-                    if os.path.exists(csv_file):
-                        # Read all rows
-                        rows = []
-                        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
-                            reader = csv.reader(f)
-                            rows = list(reader)
-                        
-                        # Update the student row
-                        if len(rows) > int(student_id.split('_')[1]) + 1:  # +1 for header
-                            student_idx = int(student_id.split('_')[1]) + 1
-                            rows[student_idx][2] = 'Archived'  # status column
-                            rows[student_idx][3] = datetime.now().strftime('%Y-%m-%d')  # archive date
-                        
-                        # Write back
-                        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
-                            writer = csv.writer(f)
-                            writer.writerows(rows)
-                    return True
+        if route_name in routes:
+            student_found = False
+            for student in routes[route_name]:
+                if student['name'] == student_name:
+                    student_found = True
+                    break
+            
+            if student_found:
+                # Update CSV file
+                csv_file = get_csv_filename(route_name)
+                if os.path.exists(csv_file):
+                    # Read all rows
+                    rows = []
+                    with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                        reader = csv.reader(f)
+                        headers = next(reader)  # Skip header
+                        for row in reader:
+                            if len(row) > 0 and row[0] == student_name:
+                                row[1] = 'Archived'  # status column
+                                row[2] = datetime.now().strftime('%Y-%m-%d')  # archive date
+                            rows.append(row)
+                    
+                    # Write back
+                    with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(['name', 'status', 'archive_date'])
+                        writer.writerows(rows)
+                return True
         return False
     except:
         return False
 
 # Restore student
-def restore_student(student_id):
+def restore_student(route_name, student_name):
     try:
-        routes = load_routes()
-        for route, students in routes.items():
-            for i, student in enumerate(students):
-                if student['id'] == student_id:
-                    # Update CSV file
-                    csv_file = get_csv_filename(route)
-                    if os.path.exists(csv_file):
-                        # Read all rows
-                        rows = []
-                        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
-                            reader = csv.reader(f)
-                            rows = list(reader)
-                        
-                        # Update the student row
-                        student_idx = int(student_id.split('_')[1]) + 1
-                        if len(rows) > student_idx:  # +1 for header
-                            rows[student_idx][2] = 'Active'  # status column
-                            rows[student_idx][3] = ''  # clear archive date
-                        
-                        # Write back
-                        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
-                            writer = csv.writer(f)
-                            writer.writerows(rows)
-                    return True
+        # Update CSV file
+        csv_file = get_csv_filename(route_name)
+        if os.path.exists(csv_file):
+            # Read all rows
+            rows = []
+            with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                headers = next(reader)  # Skip header
+                for row in reader:
+                    if len(row) > 0 and row[0] == student_name:
+                        row[1] = 'Active'  # status column
+                        row[2] = ''  # clear archive date
+                    rows.append(row)
+            
+            # Write back
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['name', 'status', 'archive_date'])
+                writer.writerows(rows)
+            return True
         return False
     except:
         return False
@@ -194,17 +200,18 @@ def save_attendance(route_name, date_str, attendance):
             reader = csv.reader(f)
             headers = next(reader)  # Read header
             for row in reader:
-                student_data[row[0]] = row  # student_id as key
-                rows.append(row)
+                if len(row) > 0:
+                    student_data[row[0]] = row  # student name as key
+                    rows.append(row)
     
     # Add date column if not exists
     if date_str not in headers:
         headers.append(date_str)
     
     # Update attendance for each student
-    for student_id, is_present in attendance.items():
-        if student_id in student_data:
-            student_row = student_data[student_id]
+    for student_name, is_present in attendance.items():
+        if student_name in student_
+            student_row = student_data[student_name]
             # Ensure row has enough columns
             while len(student_row) <= len(headers) - 1:
                 student_row.append('')
@@ -236,36 +243,33 @@ def get_attendance(route_name, date_str):
             date_col_index = headers.index(date_str)
             for row in reader:
                 # Only include active students
-                if len(row) > 2 and row[2] == 'Active':
-                    student_id = row[0]
+                if len(row) > 1 and row[1] == 'Active':
+                    student_name = row[0]
                     status = 'P' if (len(row) > date_col_index and row[date_col_index] == 'P') else 'A'
-                    attendance[student_id] = status == 'P'
+                    attendance[student_name] = status == 'P'
     
     return attendance
 
 # Get student history
-def get_student_history(student_id):
+def get_student_history(route_name, student_name):
     try:
-        routes = load_routes()
-        for route_name in routes:
-            csv_file = get_csv_filename(route_name)
-            if os.path.exists(csv_file):
-                history = []
-                with open(csv_file, 'r', newline='', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    headers = next(reader)
-                    for i, row in enumerate(reader):
-                        if len(row) > 0 and row[0] == student_id and len(row) > 2 and row[2] == 'Active':
-                            # Check all date columns
-                            for j in range(4, len(headers)):  # Skip first 4 columns (id, name, status, archive_date)
-                                if len(row) > j and row[j]:
-                                    history.append({
-                                        'date': headers[j],
-                                        'status': row[j] == 'P'
-                                    })
-                            break
-                if history:
-                    return history
+        csv_file = get_csv_filename(route_name)
+        if os.path.exists(csv_file):
+            history = []
+            with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                for row in reader:
+                    if len(row) > 0 and row[0] == student_name and len(row) > 1 and row[1] == 'Active':
+                        # Check all date columns
+                        for j in range(3, len(headers)):  # Skip first 3 columns (name, status, archive_date)
+                            if len(row) > j and row[j]:
+                                history.append({
+                                    'date': headers[j],
+                                    'status': row[j] == 'P'
+                                })
+                        break
+            return history
         return []
     except:
         return []
@@ -285,9 +289,9 @@ def get_date_history(date_str):
                 if date_str in headers:
                     date_col_index = headers.index(date_str)
                     for row in reader:
-                        if len(row) > 2 and row[2] == 'Active' and len(row) > date_col_index and row[date_col_index]:
+                        if len(row) > 1 and row[1] == 'Active' and len(row) > date_col_index and row[date_col_index]:
                             history.append({
-                                'student_name': row[1],
+                                'student_name': row[0],
                                 'route': route_name,
                                 'status': row[date_col_index] == 'P'
                             })
@@ -324,7 +328,6 @@ def get_all_students():
         for route_name, students in routes_data.items():
             for student in students:
                 all_students.append({
-                    'id': student['id'],
                     'name': student['name'],
                     'route': route_name
                 })
@@ -389,30 +392,41 @@ def add_student():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/students/<student_id>/archive', methods=['POST'])
-def archive_student_endpoint(student_id):
+@app.route('/api/students/archive', methods=['POST'])
+def archive_student_endpoint():
     try:
-        if archive_student(student_id):
+        data = request.get_json()
+        route_name = data['route']
+        student_name = data['name']
+        
+        if archive_student(route_name, student_name):
             return jsonify({'message': 'Student archived successfully'})
         else:
             return jsonify({'error': 'Failed to archive student'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/students/<student_id>/restore', methods=['POST'])
-def restore_student_endpoint(student_id):
+@app.route('/api/students/restore', methods=['POST'])
+def restore_student_endpoint():
     try:
-        if restore_student(student_id):
+        data = request.get_json()
+        route_name = data['route']
+        student_name = data['name']
+        
+        if restore_student(route_name, student_name):
             return jsonify({'message': 'Student restored successfully'})
         else:
             return jsonify({'error': 'Failed to restore student'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/history/student/<student_id>')
-def get_student_attendance_history(student_id):
+@app.route('/api/history/student', methods=['POST'])
+def get_student_attendance_history():
     try:
-        history = get_student_history(student_id)
+        data = request.get_json()
+        route_name = data['route']
+        student_name = data['name']
+        history = get_student_history(route_name, student_name)
         return jsonify({'history': history})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
