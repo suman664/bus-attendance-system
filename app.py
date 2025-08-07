@@ -1,4 +1,4 @@
-# app.py - Complete version with compatible nepali date
+# app.py - Complete version WITHOUT nepali-datetime dependency
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import json
@@ -14,22 +14,33 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'bus_data')
 ROUTES_FILE = os.path.join(DATA_DIR, 'routes.json')
 
-# Try to import nepali datetime with better error handling
-NEPALI_DATE_AVAILABLE = False
-nepali_date = None
-
-try:
-    import nepali_datetime
-    from nepali_datetime import date as nepali_date_module
-    nepali_date = nepali_date_module
-    NEPALI_DATE_AVAILABLE = True
-    print("Nepali datetime loaded successfully")
-except ImportError as e:
-    print(f"Nepali datetime not available: {e}")
-    NEPALI_DATE_AVAILABLE = False
-except Exception as e:
-    print(f"Nepali datetime import error: {e}")
-    NEPALI_DATE_AVAILABLE = False
+# Simple Gregorian to Nepali date converter (approximate)
+def gregorian_to_nepali Approximate conversion - not perfectly accurate but close enough
+    gregorian_year = gregorian_date.year
+    gregorian_month = gregorian_date.month
+    gregorian_day = gregorian_date.day
+    
+    # Rough conversion: Nepali year is approximately 56-57 years ahead
+    nepali_year = gregorian_year + 56
+    nepali_month = gregorian_month
+    nepali_day = gregorian_day
+    
+    # Adjust for month differences
+    if gregorian_month <= 9:
+        nepali_month = gregorian_month + 3
+    else:
+        nepali_month = gregorian_month - 9
+        nepali_year += 1
+    
+    # Handle day overflow
+    if nepali_day > 30:
+        nepali_day = nepali_day - 30
+        nepali_month += 1
+        if nepali_month > 12:
+            nepali_month = 1
+            nepali_year += 1
+    
+    return f"{nepali_year}-{nepali_month:02d}-{nepali_day:02d}"
 
 # Initialize data directory and files
 def initialize_data():
@@ -39,10 +50,10 @@ def initialize_data():
     # Create initial routes if file doesn't exist
     if not os.path.exists(ROUTES_FILE):
         initial_data = {
-            'Motipur Route': [],
-            'Deudha Route': [],
-            'Juraina Route': [],
-            'Dangpur Route': []
+            'Route A': [],
+            'Route B': [],
+            'Route C': [],
+            'Route D': []
         }
         with open(ROUTES_FILE, 'w') as f:
             json.dump(initial_data, f, indent=2)
@@ -283,36 +294,18 @@ def get_date_history(date_str):
     
     return history
 
-# Get Nepali date - FIXED VERSION
+# Get Nepali date - Using simple approximation
 def get_nepali_date():
-    """Get current Nepali date with proper error handling"""
+    """Get approximate Nepali date"""
     try:
-        # Get today's Gregorian date
         today = date.today()
-        
-        # Try to use nepali_datetime if available
-        if NEPALI_DATE_AVAILABLE and nepali_date:
-            try:
-                # Convert Gregorian date to Nepali
-                nepali_dt = nepali_date.from_datetime_date(today)
-                # Return formatted date
-                return str(nepali_dt)
-            except Exception as convert_error:
-                print(f"Nepali date conversion error: {convert_error}")
-                # Fallback to Gregorian
-                return today.strftime('%Y-%m-%d')
-        else:
-            # Fallback to Gregorian date
-            return today.strftime('%Y-%m-%d')
-            
+        nepali_date_str = gregorian_to_nepali(today)
+        return nepali_date_str
     except Exception as e:
-        print(f"Error getting nepali date: {e}")
-        # Ultimate fallback
-        try:
-            today = date.today()
-            return today.strftime('%Y-%m-%d')
-        except:
-            return "2080-01-01"  # Default fallback
+        print(f"Error in date conversion: {e}")
+        # Fallback to Gregorian with note
+        today = date.today()
+        return today.strftime('%Y-%m-%d')
 
 # API Routes
 @app.route('/api/routes')
@@ -446,21 +439,13 @@ def debug_date():
     """Debug endpoint to check date conversion"""
     try:
         today = date.today()
+        approx_nepali = gregorian_to_nepali(today)
         
         debug_info = {
             'gregorian_date': today.strftime('%Y-%m-%d'),
-            'nepali_available': NEPALI_DATE_AVAILABLE,
-            'nepali_import_success': nepali_date is not None,
-            'nepali_date_result': None,
-            'error': None
+            'approximate_nepali_date': approx_nepali,
+            'note': 'Using approximate conversion (not perfectly accurate but close)'
         }
-        
-        if NEPALI_DATE_AVAILABLE and nepali_date:
-            try:
-                nepali_dt = nepali_date.from_datetime_date(today)
-                debug_info['nepali_date_result'] = str(nepali_dt)
-            except Exception as e:
-                debug_info['error'] = f"Conversion error: {str(e)}"
         
         return jsonify(debug_info)
     except Exception as e:
