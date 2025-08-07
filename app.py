@@ -7,6 +7,16 @@ from datetime import datetime
 import calendar
 from nepali_datetime import date as nepali_date
 import nepali_datetime
+# Add this at the top of your app.py
+try:
+    import pandas as pd
+    from pandas import ExcelWriter
+except ImportError:
+    # Fallback if pandas fails
+    print("Pandas not available, using basic CSV")
+    import csv
+    import json
+    pd = None
 
 app = Flask(__name__)
 CORS(app)
@@ -489,4 +499,5 @@ def get_current_nepali_date():
 if __name__ == '__main__':
     # Initialize the Excel file
     initialize_excel()
+
     app.run(debug=True, port=int(os.environ.get('PORT', 5000)))
