@@ -1,383 +1,303 @@
-# app.py
+# app.py - Complete version without pandas
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import pandas as pd
+import json
 import os
 from datetime import datetime
-import calendar
+import csv
 from nepali_datetime import date as nepali_date
 import nepali_datetime
-# Add this at the top of your app.py
-try:
-    import pandas as pd
-    from pandas import ExcelWriter
-except ImportError:
-    # Fallback if pandas fails
-    print("Pandas not available, using basic CSV")
-    import csv
-    import json
-    pd = None
 
 app = Flask(__name__)
 CORS(app)
 
-# Configuration - Use Render's environment or local
+# Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXCEL_FILE = os.path.join(BASE_DIR, 'bus_attendance.xlsx')
+DATA_DIR = os.path.join(BASE_DIR, 'bus_data')
+ROUTES_FILE = os.path.join(DATA_DIR, 'routes.json')
 
-# Initialize Excel file with empty routes if it doesn't exist
-def initialize_excel():
-    if not os.path.exists(EXCEL_FILE):
-        # Create empty sheets for each route
-        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-            routes = ['Route A', 'Route B', 'Route C', 'Route D']
-            
-            for route_name in routes:
-                # Create DataFrame with Name, Status, and Archive Date columns
-                df = pd.DataFrame({
-                    'Name': [],
-                    'Status': [],
-                    'Archive Date': []
-                })
-                df.to_excel(writer, sheet_name=route_name, index=False)
-
-# [Include ALL your existing functions here - copy from previous complete app.py]
-# Functions: get_all_routes, get_students_for_route, save_attendance, 
-# archive_student_from_route, restore_student, get_student_history, etc.
-
-# Get all route names
-def get_all_routes():
-    initialize_excel()
-    try:
-        xls = pd.ExcelFile(EXCEL_FILE)
-        return xls.sheet_names
-    except Exception as e:
-        print(f"Error reading routes: {e}")
-        return []
-
-# Get all routes and students
-def get_all_routes_and_students():
-    initialize_excel()
-    routes = {}
+# Initialize data directory and files
+def initialize_data():
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
     
-    # Load the Excel file
-    xls = pd.ExcelFile(EXCEL_FILE)
-    
-    for sheet_name in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name)
-        students = []
-        for idx, row in df.iterrows():
-            # Only include active students
-            status = row.get('Status', 'Active')
-            if status == 'Active':
-                students.append({
-                    'id': f"{sheet_name}_{idx}",
-                    'name': row['Name'],
-                    'route': sheet_name
-                })
-        routes[sheet_name] = students
-    
-    return routes
+    # Create initial routes if file doesn't exist
+    if not os.path.exists(ROUTES_FILE):
+        initial_data = {
+            'Route A': [],
+            'Route B': [],
+            'Route C': [],
+            'Route D': []
+        }
+        with open(ROUTES_FILE, 'w') as f:
+            json.dump(initial_data, f, indent=2)
 
-# Get students for a specific route (active only by default)
-def get_students_for_route(route_name, include_archived=False):
-    initialize_excel()
-    try:
-        df = pd.read_excel(EXCEL_FILE, sheet_name=route_name)
-        students = []
-        
-        for idx, row in df.iterrows():
-            # Check if we should include archived students or only active ones
-            status = row.get('Status', 'Active')  # Default to Active if Status column doesn't exist
-            is_archived = status == 'Archived'
-            
-            if include_archived or not is_archived:
-                students.append({
-                    'id': f"{route_name}_{idx}",
-                    'name': row['Name'],
-                    'status': status,
-                    'archive_date': row.get('Archive Date', None) if is_archived else None
-                })
-        return students
-    except Exception as e:
-        print(f"Error reading route {route_name}: {e}")
-        return []
+# Load routes data
+def load_routes():
+    initialize_data()
+    with open(ROUTES_FILE, 'r') as f:
+        return json.load(f)
 
-# Get attendance for a specific route and date
-def get_attendance(route_name, date_str):
-    initialize_excel()
-    try:
-        df = pd.read_excel(EXCEL_FILE, sheet_name=route_name)
-        
-        # Check if date column exists
-        if date_str in df.columns:
-            attendance = {}
-            for idx, row in df.iterrows():
-                # Only include active students in attendance
-                status = row.get('Status', 'Active')
-                if status == 'Active':
-                    student_id = f"{route_name}_{idx}"
-                    # Assuming 'P' for present, 'A' for absent, or empty for no record
-                    status_value = row[date_str] if pd.notna(row[date_str]) else 'P'
-                    attendance[student_id] = status_value == 'P'
-            return attendance
-        else:
-            # No attendance recorded for this date
-            return {}
-    except Exception as e:
-        print(f"Error reading attendance for {route_name} on {date_str}: {e}")
-        return {}
+# Save routes data
+def save_routes(data):
+    with open(ROUTES_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
 
-# Save attendance for a specific route and date
-def save_attendance(route_name, date_str, attendance):
-    initialize_excel()
-    try:
-        # Read existing data
-        with pd.ExcelFile(EXCEL_FILE) as xls:
-            sheets = {}
-            for sheet in xls.sheet_names:
-                sheets[sheet] = pd.read_excel(xls, sheet)
-        
-        # Get the specific route sheet
-        df = sheets[route_name].copy()
-        
-        # Add date column if it doesn't exist
-        if date_str not in df.columns:
-            df[date_str] = ''  # Initialize with empty values
-        
-        # Update attendance values
-        for student_id, is_present in attendance.items():
-            # Extract index from student_id (format: "Route_X")
-            try:
-                idx = int(student_id.split('_')[1])
-                # Only update if student is active
-                student_status = df.at[idx, 'Status'] if 'Status' in df.columns else 'Active'
-                if student_status == 'Active':
-                    df.at[idx, date_str] = 'P' if is_present else 'A'
-            except (IndexError, ValueError):
-                continue
-        
-        # Save all sheets back to Excel
-        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-            for sheet_name, sheet_df in sheets.items():
-                if sheet_name == route_name:
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                else:
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
-        
-        return True
-    except Exception as e:
-        print(f"Error saving attendance for {route_name} on {date_str}: {e}")
-        return False
+# Get CSV filename for a route
+def get_csv_filename(route_name):
+    safe_name = route_name.replace(' ', '_').replace('/', '_')
+    return os.path.join(DATA_DIR, f"{safe_name}.csv")
 
-# Add student to a route
+# Initialize CSV file for a route
+def initialize_route_csv(route_name):
+    csv_file = get_csv_filename(route_name)
+    if not os.path.exists(csv_file):
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['student_id', 'name', 'status', 'archive_date'])
+
+# Add student to route
 def add_student_to_route(route_name, student_name):
-    initialize_excel()
-    try:
-        # Read existing data
-        with pd.ExcelFile(EXCEL_FILE) as xls:
-            sheets = {}
-            for sheet in xls.sheet_names:
-                sheets[sheet] = pd.read_excel(xls, sheet)
-        
-        # Get the specific route sheet
-        df = sheets[route_name].copy()
-        
-        # Add new student with Active status
-        new_row = pd.DataFrame({
-            'Name': [student_name],
-            'Status': ['Active'],
-            'Archive Date': ['']
-        })
-        df = pd.concat([df, new_row], ignore_index=True)
-        
-        # Save all sheets back to Excel
-        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-            for sheet_name, sheet_df in sheets.items():
-                if sheet_name == route_name:
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                else:
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
-        
-        return True
-    except Exception as e:
-        print(f"Error adding student to {route_name}: {e}")
+    # Load current routes
+    routes = load_routes()
+    
+    if route_name not in routes:
         return False
+    
+    # Add student to routes JSON
+    student_id = f"{route_name}_{len(routes[route_name])}"
+    routes[route_name].append({
+        'id': student_id,
+        'name': student_name
+    })
+    save_routes(routes)
+    
+    # Initialize CSV file for this route
+    initialize_route_csv(route_name)
+    
+    # Add student to CSV
+    csv_file = get_csv_filename(route_name)
+    with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow([student_id, student_name, 'Active', ''])
+    
+    return True
 
-# Archive student from a route (instead of deleting)
-def archive_student_from_route(student_id):
-    initialize_excel()
+# Get students for route
+def get_students_for_route(route_name):
+    routes = load_routes()
+    if route_name in routes:
+        return routes[route_name]
+    return []
+
+# Archive student
+def archive_student(student_id):
     try:
         route_name, student_idx = student_id.split('_')
-        student_idx = int(student_idx)
-        
-        # Read existing data
-        with pd.ExcelFile(EXCEL_FILE) as xls:
-            sheets = {}
-            for sheet in xls.sheet_names:
-                sheets[sheet] = pd.read_excel(xls, sheet)
-        
-        # Get the specific route sheet
-        df = sheets[route_name].copy()
-        
-        # Update student status to Archived
-        if 'Status' not in df.columns:
-            df['Status'] = 'Active'  # Add Status column if it doesn't exist
-        if 'Archive Date' not in df.columns:
-            df['Archive Date'] = ''  # Add Archive Date column if it doesn't exist
-            
-        df.at[student_idx, 'Status'] = 'Archived'
-        df.at[student_idx, 'Archive Date'] = datetime.now().strftime('%Y-%m-%d')
-        
-        # Save all sheets back to Excel
-        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-            for sheet_name, sheet_df in sheets.items():
-                if sheet_name == route_name:
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                else:
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
-        
-        return True
-    except Exception as e:
-        print(f"Error archiving student {student_id}: {e}")
+        route_name = route_name + '_' + student_idx.split('_')[0]  # Reconstruct if needed
+        # Find the correct route
+        routes = load_routes()
+        for route, students in routes.items():
+            for i, student in enumerate(students):
+                if student['id'] == student_id:
+                    # Update CSV file
+                    csv_file = get_csv_filename(route)
+                    if os.path.exists(csv_file):
+                        # Read all rows
+                        rows = []
+                        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                            reader = csv.reader(f)
+                            rows = list(reader)
+                        
+                        # Update the student row
+                        if len(rows) > int(student_idx) + 1:  # +1 for header
+                            rows[int(student_idx) + 1][2] = 'Archived'  # status column
+                            rows[int(student_idx) + 1][3] = datetime.now().strftime('%Y-%m-%d')  # archive date
+                        
+                        # Write back
+                        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                            writer = csv.writer(f)
+                            writer.writerows(rows)
+                    return True
+        return False
+    except:
         return False
 
-# Restore archived student
+# Restore student
 def restore_student(student_id):
-    initialize_excel()
     try:
-        route_name, student_idx = student_id.split('_')
-        student_idx = int(student_idx)
-        
-        # Read existing data
-        with pd.ExcelFile(EXCEL_FILE) as xls:
-            sheets = {}
-            for sheet in xls.sheet_names:
-                sheets[sheet] = pd.read_excel(xls, sheet)
-        
-        # Get the specific route sheet
-        df = sheets[route_name].copy()
-        
-        # Update student status to Active
-        if 'Status' in df.columns:
-            df.at[student_idx, 'Status'] = 'Active'
-            df.at[student_idx, 'Archive Date'] = ''
-        
-        # Save all sheets back to Excel
-        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-            for sheet_name, sheet_df in sheets.items():
-                if sheet_name == route_name:
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                else:
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
-        
-        return True
-    except Exception as e:
-        print(f"Error restoring student {student_id}: {e}")
+        routes = load_routes()
+        for route, students in routes.items():
+            for i, student in enumerate(students):
+                if student['id'] == student_id:
+                    # Update CSV file
+                    csv_file = get_csv_filename(route)
+                    if os.path.exists(csv_file):
+                        # Read all rows
+                        rows = []
+                        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                            reader = csv.reader(f)
+                            rows = list(reader)
+                        
+                        # Update the student row
+                        student_idx = i
+                        if len(rows) > student_idx + 1:  # +1 for header
+                            rows[student_idx + 1][2] = 'Active'  # status column
+                            rows[student_idx + 1][3] = ''  # clear archive date
+                        
+                        # Write back
+                        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                            writer = csv.writer(f)
+                            writer.writerows(rows)
+                    return True
+        return False
+    except:
         return False
 
-# Get archived students for a route
-def get_archived_students(route_name):
-    return get_students_for_route(route_name, include_archived=True)
+# Save attendance
+def save_attendance(route_name, date_str, attendance):
+    csv_file = get_csv_filename(route_name)
+    if not os.path.exists(csv_file):
+        initialize_route_csv(route_name)
+    
+    # Read existing data
+    rows = []
+    headers = []
+    student_data = {}
+    
+    if os.path.exists(csv_file):
+        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            headers = next(reader)  # Read header
+            for row in reader:
+                student_data[row[0]] = row  # student_id as key
+                rows.append(row)
+    
+    # Add date column if not exists
+    if date_str not in headers:
+        headers.append(date_str)
+    
+    # Update attendance for each student
+    for student_id, is_present in attendance.items():
+        if student_id in student_data:
+            student_row = student_data[student_id]
+            # Ensure row has enough columns
+            while len(student_row) <= len(headers) - 1:
+                student_row.append('')
+            # Set attendance value
+            date_col_index = headers.index(date_str)
+            student_row[date_col_index] = 'P' if is_present else 'A'
+    
+    # Write back to file
+    with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        for row in student_data.values():
+            writer.writerow(row)
+    
+    return True
+
+# Get attendance
+def get_attendance(route_name, date_str):
+    csv_file = get_csv_filename(route_name)
+    if not os.path.exists(csv_file):
+        return {}
+    
+    attendance = {}
+    with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        if date_str in headers:
+            date_col_index = headers.index(date_str)
+            for row in reader:
+                # Only include active students
+                if len(row) > 2 and row[2] == 'Active':
+                    student_id = row[0]
+                    status = 'P' if (len(row) > date_col_index and row[date_col_index] == 'P') else 'A'
+                    attendance[student_id] = status == 'P'
+    
+    return attendance
 
 # Get student history
 def get_student_history(student_id):
-    initialize_excel()
     try:
-        route_name, student_idx = student_id.split('_')
-        student_idx = int(student_idx)
-        
-        df = pd.read_excel(EXCEL_FILE, sheet_name=route_name)
-        history = []
-        
-        # Iterate through all date columns (excluding 'Name', 'Status', 'Archive Date')
-        for col in df.columns:
-            if col not in ['Name', 'Status', 'Archive Date']:
-                if col in df.columns and pd.notna(df.at[student_idx, col]):
-                    status = df.at[student_idx, col]
-                    history.append({
-                        'date': col,
-                        'status': status == 'P'
-                    })
-        
-        return history
-    except Exception as e:
-        print(f"Error getting history for student {student_id}: {e}")
+        route_name = student_id.split('_')[0] + '_' + student_id.split('_')[1].split('_')[0]
+        # Find the correct route
+        routes = load_routes()
+        for route in routes:
+            csv_file = get_csv_filename(route)
+            if os.path.exists(csv_file):
+                history = []
+                with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    headers = next(reader)
+                    for i, row in enumerate(reader):
+                        if row[0] == student_id and len(row) > 2 and row[2] == 'Active':
+                            # Check all date columns
+                            for j in range(4, len(headers)):  # Skip first 4 columns (id, name, status, archive_date)
+                                if len(row) > j and row[j]:
+                                    history.append({
+                                        'date': headers[j],
+                                        'status': row[j] == 'P'
+                                    })
+                            break
+                return history
+        return []
+    except:
         return []
 
 # Get date history
 def get_date_history(date_str):
-    initialize_excel()
-    try:
-        xls = pd.ExcelFile(EXCEL_FILE)
-        history = []
-        
-        for sheet_name in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name)
-            
-            if date_str in df.columns:
-                for idx, row in df.iterrows():
-                    # Only include active students in date history
-                    status = row.get('Status', 'Active')
-                    if status == 'Active' and pd.notna(row[date_str]):
-                        status_value = row[date_str]
-                        history.append({
-                            'student_name': row['Name'],
-                            'route': sheet_name,
-                            'status': status_value == 'P'
-                        })
-        
-        return history
-    except Exception as e:
-        print(f"Error getting history for date {date_str}: {e}")
-        return []
+    history = []
+    routes = load_routes()
+    
+    for route_name in routes:
+        csv_file = get_csv_filename(route_name)
+        if os.path.exists(csv_file):
+            with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                
+                if date_str in headers:
+                    date_col_index = headers.index(date_str)
+                    for row in reader:
+                        if len(row) > 2 and row[2] == 'Active' and len(row) > date_col_index:
+                            history.append({
+                                'student_name': row[1],
+                                'route': route_name,
+                                'status': row[date_col_index] == 'P'
+                            })
+    
+    return history
 
-# Get Nepali date for today
+# Get Nepali date
 def get_nepali_date():
     today = datetime.today()
     nepali_dt = nepali_date.from_datetime_date(today.date())
     return nepali_dt.strftime('%Y-%m-%d')
 
-# Sync offline data endpoint
-@app.route('/api/sync', methods=['POST'])
-def sync_offline_data():
-    """Endpoint to sync offline data when connection is restored"""
-    try:
-        data = request.get_json()
-        offline_records = data.get('records', [])
-        
-        synced_count = 0
-        for record in offline_records:
-            route = record['route']
-            date = record['date']
-            attendance = record['attendance']
-            
-            if save_attendance(route, date, attendance):
-                synced_count += 1
-        
-        return jsonify({
-            'message': f'Successfully synced {synced_count} records',
-            'synced_count': synced_count
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 # API Routes
 @app.route('/api/routes')
 def get_routes():
     try:
-        routes = get_all_routes()
-        return jsonify({'routes': routes})
+        routes = load_routes()
+        return jsonify({'routes': list(routes.keys())})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/students')
 def get_all_students():
     try:
-        routes = get_all_routes_and_students()
+        routes_data = load_routes()
         all_students = []
-        for route_students in routes.values():
-            all_students.extend(route_students)
+        for route_name, students in routes_data.items():
+            for student in students:
+                all_students.append({
+                    'id': student['id'],
+                    'name': student['name'],
+                    'route': route_name
+                })
         return jsonify({'students': all_students})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -385,9 +305,7 @@ def get_all_students():
 @app.route('/api/students/<route_name>')
 def get_route_students(route_name):
     try:
-        # By default, only return active students
-        include_archived = request.args.get('archived', 'false').lower() == 'true'
-        students = get_students_for_route(route_name, include_archived)
+        students = get_students_for_route(route_name)
         return jsonify({'students': students})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -415,7 +333,6 @@ def save_route_attendance():
         attendance = data['attendance']
         
         if save_attendance(route_name, date_str, attendance):
-            # Return updated summary
             present = sum(1 for status in attendance.values() if status)
             total = len(attendance)
             return jsonify({
@@ -443,9 +360,9 @@ def add_student():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/students/<student_id>/archive', methods=['POST'])
-def archive_student(student_id):
+def archive_student_endpoint(student_id):
     try:
-        if archive_student_from_route(student_id):
+        if archive_student(student_id):
             return jsonify({'message': 'Student archived successfully'})
         else:
             return jsonify({'error': 'Failed to archive student'}), 500
@@ -453,22 +370,12 @@ def archive_student(student_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/students/<student_id>/restore', methods=['POST'])
-def restore_archived_student(student_id):
+def restore_student_endpoint(student_id):
     try:
         if restore_student(student_id):
             return jsonify({'message': 'Student restored successfully'})
         else:
             return jsonify({'error': 'Failed to restore student'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/students/<route_name>/archived')
-def get_archived_students_route(route_name):
-    try:
-        students = get_archived_students(route_name)
-        # Filter to only archived students
-        archived_students = [s for s in students if s['status'] == 'Archived']
-        return jsonify({'students': archived_students})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -496,8 +403,29 @@ def get_current_nepali_date():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-if __name__ == '__main__':
-    # Initialize the Excel file
-    initialize_excel()
+# Sync offline data endpoint
+@app.route('/api/sync', methods=['POST'])
+def sync_offline_data():
+    try:
+        data = request.get_json()
+        offline_records = data.get('records', [])
+        
+        synced_count = 0
+        for record in offline_records:
+            route = record['route']
+            date = record['date']
+            attendance = record['attendance']
+            
+            if save_attendance(route, date, attendance):
+                synced_count += 1
+        
+        return jsonify({
+            'message': f'Successfully synced {synced_count} records',
+            'synced_count': synced_count
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
+if __name__ == '__main__':
+    initialize_data()
     app.run(debug=True, port=int(os.environ.get('PORT', 5000)))
